@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sound": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "/home/cheese/Desktop/Dev/sound", "run", "sound", "mcp"]
+    },
+    "ardour": {
+      "type": "http",
+      "url": "http://127.0.0.1:4820/mcp"
+    }
+  }
+}

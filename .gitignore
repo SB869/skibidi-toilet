@@ -1,0 +1,17 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Audio: personal takes and renders stay out of git
+*_tuned.wav
+*_tuned.png
+recordings/
+sessions/
+instruments/
