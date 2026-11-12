@@ -15,3 +15,29 @@ wheels/
 recordings/
 sessions/
 instruments/
+
+# Any audio, wherever it lands (takes, references, renders, stems, browser recordings)
+*.wav
+*.wave
+*.flac
+*.mp3
+*.ogg
+*.oga
+*.opus
+*.m4a
+*.aac
+*.aif
+*.aiff
+*.aifc
+*.caf
+*.w64
+*.rf64
+*.wma
+*.webm
+*.weba
+
+# Sample libraries and DAW sessions
+*.sf2
+*.sf3
+*.sfz
+*.ardour
