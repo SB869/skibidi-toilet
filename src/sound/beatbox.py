@@ -448,12 +448,52 @@ def _mini(steps: list[str]) -> str:
     return bars[0] if len(bars) == 1 else "<" + " ".join(bars) + ">"
 
 
+def _runs(bars: list[list[tuple[str, int]]]) -> str:
+    """(value, length in 16ths) runs of each bar as mini-notation with @lengths, one bar per cycle."""
+    out = ["[" + " ".join(f"{v}@{n}" if n > 1 else v for v, n in bar) + "]" for bar in bars]
+    return out[0] if len(out) == 1 else "<" + " ".join(out) + ">"
+
+
 def _weighted(bars: list[list[Event]], value) -> str:
     """Events of each bar as mini-notation with @lengths, one bar per cycle."""
+    return _runs([[(str(value(e)), e.length) for e in evs] for evs in bars])
+
+
+def chord(note: int, root: int) -> tuple[int, ...] | None:
+    """The triad over a bass note in the key (TRIADS), voiced close: its notes within the octave up from the
+    root at or above CHORD_LOW. None for a passing note."""
+    d = (note - root) % 12
+    if d not in TRIADS:
+        return None
+    lo = CHORD_LOW + (root - CHORD_LOW) % 12
+    return tuple(sorted(lo + (root + x - lo) % 12 for x in TRIADS[d]))
+
+
+def _chord_name(c: tuple[int, ...]) -> str:
+    return "[" + ",".join(_name(n) for n in c) + "]"
+
+
+def harmony(bars: list[list[Event]], root: int) -> list[list[tuple[tuple[int, ...], int]]]:
+    """Each bar's chords as (chord, length in 16ths) runs: the chord over each note the bass holds, passing notes
+    and pickups (shorter than an 8th) keeping the chord before them, equal neighbours merged."""
     out = []
     for evs in bars:
-        out.append("[" + " ".join(f"{value(e)}@{e.length}" if e.length > 1 else str(value(e)) for e in evs) + "]")
-    return out[0] if len(out) == 1 else "<" + " ".join(out) + ">"
+        chords = [chord(e.note, root) if e.note is not None and e.length >= 2 else None for e in evs]
+        first = next((c for c in chords if c), chord(root, root))
+        row: list[tuple[tuple[int, ...], int]] = []
+        for e, c in zip(evs, chords):
+            c = c or (row[-1][0] if row else first)
+            if row and row[-1][0] == c:
+                row[-1] = (c, row[-1][1] + e.length)
+            else:
+                row.append((c, e.length))
+        out.append(row)
+    return out
+
+
+def step_chords(evs: list[Event], root: int) -> list[tuple[int, ...]]:
+    """The chord sounding on each 16th of one bar (events in bar time)."""
+    return [c for c, n in harmony([evs], root)[0] for _ in range(n)]
 
 
 # ---------------------------------------------------------------- Strudel
@@ -468,46 +508,75 @@ KICK = dict(penv=24, pdecay=.05, decay=.2)   # a beatboxed boom: a short tone sw
 KICK_GAIN, SUB_GAIN = .35, .1
 
 # "synth": what the beatbox stands for - a dance bass playing the riff on the pulse of its bwoms, each one as loud
-# as it was pushed (velocity), the cutoff drifting a little over the bars (perlin), an 8th-note echo putting
-# ghosts between the bwoms, a deep kick in the riff's key, and the sub ducking under it (the bass isn't ducked:
-# its bwoms fall between and on the kicks). The sound is one of BASSES; none of them sweeps a resonant filter on
-# each note (a driven saw doing that was tried first and sounded like a fart). Gains are set so each lands at
-# about the same level under the kick. (Dirt's "jvbass" sample is silent in the embedded editor: not offered.)
-# Placeholders: {riff} the notes, {riff_up} an octave up, {gain}, {vel} the velocity line, {echo} the delay,
-# {late} the shift onto the first bwom
+# as it was pushed (velocity), a 909 kick where the booms were, and a sine sub ducking under it (the bass isn't
+# ducked: its bwoms fall between and on the kicks). The sound is one of BASSES, dry (the echoes go on the song's
+# hook, not under the kick). The default plucks each note with its filter: the cutoff jumps up and falls back in
+# ~140 ms - the hit-then-sink of a bwom. None of them opens the filter *after* the hit: a saw doing that was tried
+# first and sounded like a fart (measured: brightness rising half an octave right after each note; a pluck's
+# falls). Gains are set so each lands at about the same level under the kick. (Dirt's "jvbass" sample is silent
+# in the embedded editor: not offered.) Placeholders: {riff} the notes, {riff_up} an octave up, {gain}, {vel} the
+# velocity line, {late} the shift onto the first bwom
 BASSES = {
-    "synth": dict(about="a synth bass (General MIDI's Synth Bass 2): a filtered saw with a plucky attack", gain=.45,
-                  code='note("{riff}").s("gm_synth_bass_2").gain({gain:g}){vel}\n    .lpf(perlin.range(1200, 2400).slow(4)).release(.1){echo}{late}'),
-    "bright": dict(about="a brighter synth bass (General MIDI's Synth Bass 1): more edge, cuts through", gain=.6,
-                   code='note("{riff}").s("gm_synth_bass_1").gain({gain:g}){vel}\n    .lpf(perlin.range(1500, 3000).slow(4)).release(.1){echo}{late}'),
+    "saw": dict(about="a driven saw, each note plucked by its filter (the cutoff jumps and falls back): techno's bass", gain=.5,
+                code='note("{riff}").s("sawtooth").shape(.2).gain({gain:g}){vel}\n'
+                     '    .lpf(perlin.range(450, 560).slow(4)).lpenv(2.2).lpattack(.006).lpdecay(.17).lpsustain(.2).lpq(2)\n'
+                     '    .attack(.004).decay(.22).sustain(.3).release(.06){late}'),
+    "square": dict(about="a square wave plucked the same way: hollower, rounder", gain=.4,
+                   code='note("{riff}").s("square").gain({gain:g}){vel}\n'
+                        '    .lpf(perlin.range(350, 480).slow(4)).lpenv(2).lpattack(.001).lpdecay(.1).lpsustain(.1).lpq(.5)\n'
+                        '    .attack(.003).decay(.2).sustain(.5).release(.05){late}'),
     "fm": dict(about="an FM bass: a sine with a second sine bending it, hard at the start of each note, then round", gain=.55,
                code='note("{riff}").s("sine").fm(2).fmh(2).fmattack(.001).fmdecay(.12).fmsustain(.15).gain({gain:g}){vel}\n'
-                    '    .attack(.005).decay(.25).sustain(.3).release(.05){echo}{late}'),
-    "pluck": dict(about="a deep pluck: a triangle wave with a little edge, low-passed, short", gain=.45,
-                  code='note("{riff}").s("triangle").shape(.25).gain({gain:g}){vel}\n'
-                       '    .lpf(perlin.range(500, 800).slow(4)).attack(.005).decay(.25).sustain(.25).release(.05){echo}{late}'),
+                    '    .attack(.005).decay(.25).sustain(.3).release(.05){late}'),
+    "synth": dict(about="a synth bass (General MIDI's Synth Bass 2): a filtered saw with a plucky attack, sustained", gain=.45,
+                  code='note("{riff}").s("gm_synth_bass_2").gain({gain:g}){vel}\n    .lpf(perlin.range(1200, 2400).slow(4)).release(.1){late}'),
+    "bright": dict(about="a brighter synth bass (General MIDI's Synth Bass 1): more edge, cuts through", gain=.6,
+                   code='note("{riff}").s("gm_synth_bass_1").gain({gain:g}){vel}\n    .lpf(perlin.range(1500, 3000).slow(4)).release(.1){late}'),
     "finger": dict(about="a fingered electric bass (General MIDI): the house way, warm and played", gain=.55,
-                   code='note("{riff}").s("gm_electric_bass_finger").gain({gain:g}){vel}\n    .release(.1){echo}{late}'),
+                   code='note("{riff}").s("gm_electric_bass_finger").gain({gain:g}){vel}\n    .release(.1){late}'),
 }
-ECHO = dict(mix=.25, sync="2/16", feedback=.3)            # an 8th note: the echoes fall between the bwoms
 RISER_CLIP = .97                 # share of its 8 bars the riser sounds: it stops a beat early, the drop lands out of silence
-DRUM_BANK = "RolandTR909"       # the open hat and crash the song adds (the 909: house and techno's kit)
-# The hats under the drop. {accents} is a gain per 16th made from the groove: loudest on the riff's bwoms, medium
-# on the kicks, soft between - so the hats ride the riff's pulse instead of cutting straight 8ths across it
+DRUM_BANK = "RolandTR909"       # the kit the song adds (the 909: house and techno's)
+OFFBEATS = (2, 6, 10, 14)        # the off-beat 8ths (16ths, from 0): where house puts its open hat and chord stabs
+SWING = .006                     # cycles the off 16ths of the hats are pushed late: ~12 ms at 124 BPM, a light swing
+# The hats under the drop. {house} and {pulse} are a gain per 16th made from the groove: {house} loudest on the
+# off-beat 8ths (the house accent), then the bwoms, then the kicks; {pulse} loudest on the riff's bwoms. {swing}
+# pushes every other 16th late
 HATS = {
+    "house": dict(about="16ths on the 909 hat, accented on the off-beats, lightly swung, no two hits alike (velocity), one in twelve dropped", bank="RolandTR909",
+                  code='s("hh*16").bank("RolandTR909").gain("{house}").late("[0 {swing}]*8").velocity(perlin.range(.7, 1).fast(4)).degradeBy(.08)\n'
+                       '    .hpf(250).lpf(12000).orbit(5)'),
     "pulse": dict(about="16ths on a short 808 tick, accented on your bwoms", bank="RolandTR808",
-                  code='s("hh*16").bank("RolandTR808").gain("{accents}")'),
-    "straight": dict(about="16ths on a 909 hat, accented on the 8ths", bank="RolandTR909",
-                     code='s("hh*16").bank("RolandTR909").gain("[.24 .13 .18 .13]*4")'),
+                  code='s("hh*16").bank("RolandTR808").gain("{pulse}").hpf(250).orbit(5)'),
     "offbeat": dict(about="a 909 hat on the off-beat 8ths only, the house way", bank="RolandTR909",
-                    code='s("[~ hh]*4").bank("RolandTR909").gain(.25)'),
+                    code='s("[~ hh]*4").bank("RolandTR909").gain(.3).hpf(250).lpf(12000).orbit(5)'),
 }
-HAT = "pulse"                    # the default of HATS
-SYNTH_KICK = dict(penv=36, pdecay=.06, decay=.35, gain=.6)
-SYNTH_SUB, DUCK = .25, dict(attack=.2, depth=.6)
+HAT = "house"                    # the default of HATS
+SYNTH_KICK = dict(bank="RolandTR909", gain=.46, speed=.95)   # the 909 kick: its knock at 90-200 Hz, the sine boom and sub have the bottom; .95 settles its
+                                                              # tail on D#2 (~78 Hz), a 4th over the A#1 sub, instead of between D# and E
+SYNTH_SUB = .5                   # the sub has the bottom: the 909 has nothing under 60 Hz
+# Sidechain: the kick ducks the sub hard and the pad, stabs, hook and (lightly) the 909 kit, so the whole top breathes with
+# it; the bass (orbit 0) is not ducked, its bwoms fall on and between the kicks.
+# (depth, attack): the sub (orbit 2) from the kick itself; the pad (orbit 6), stabs and hook (orbit 4) and the 909 kit (orbit 5)
+# from silent "ghost" copies of the kick - superdough takes one duckorbit per sound (a "2:1:4" string broke the kick). Orbit 1
+# is superdough's default bus, where the kick and bass live: ducking it ducks the kick (measured -6 dB), so nothing goes there
+# on purpose. duckdepth d is about 1 - sqrt(d) of gain: .6 = -13 dB, .4 = -9, .2 = -5
+DUCK = dict(sub=(.6, .2), pad=(.4, .15), top=(.4, .15), kit=(.2, .1))
+# Space: one short room per bus (superdough's reverb is per orbit; its size is shared by the voices on the bus)
+ROOM = dict(size=1.5, lp=5000, stabs=.3, pad=.2, hook=.3, ohat=.3, ride=.3, crash=.3)   # a short, dark room; not on the kick, sub, bass or the 16th hats
+# buses: 1 (default) kick, boom, own, bass, riser; 2 sub; 3 the bass's breakdown echo; 4 stabs and hook (one echo, one room); 5 the 909 kit; 6 the pad
+BOOM = dict(penv=12, pdecay=.15, decay=.18, gain=.2)   # a tuned sine boom stacked under the 909 (the knock from the 909, the weight from this)
 STYLES = ("synth", "mouth")     # play what the beatbox stands for, or copy the mouth
-BASS = "synth"                  # the default of BASSES
+BASS = "saw"                    # the default of BASSES
 FORMS = ("loop", "song")        # the beat looped, or laid out as a track
+TEMPO = 124                      # the song's tempo (the loop plays at the beatbox's own): club house, 7% up from this take
+
+# Harmony, from the riff: a chord on each note the bass plays, in the minor the riff implies - the natural minor
+# with the Phrygian 2nd, which a riff walking root, b2, b7 (as this one does) spells. Semitones from the root of
+# each degree that gets a chord, and its triad; other notes (the leading tone, the 2nd) are passing notes and keep
+# the chord around them. So a stab or pad never clashes with the bass: it moves when the bass does
+TRIADS = {0: (0, 3, 7), 1: (1, 5, 8), 3: (3, 7, 10), 5: (5, 8, 0), 7: (7, 10, 2), 8: (8, 0, 3), 10: (10, 1, 5)}
+CHORD_LOW = 53                   # chords are voiced within the octave up from the key's root at or above F3
 
 
 @dataclass
@@ -516,20 +585,27 @@ class Piece:
     name: str
     about: list[str]              # comment lines above it
     code: str                     # the expression; continuation lines start with 4 spaces
+    loop: bool = True             # part of the beat looped; False = a song piece (harmony, hook), a comment in the loop
+    frame: str = "beat"           # "riff": follows the riff, cut from its first bwom (the song arranges those apart and shifts them)
 
 
-def _setup(g: Groove, kit: dict[str, str] | None) -> list[str]:
-    return [f"setcpm({g.bpm:g}/4)"] + (["samples({ " + ", ".join(f"bb_{k}: ['{u}']" for k, u in kit.items()) + " })"] if kit else [])
+def _setup(g: Groove, kit: dict[str, str] | None, bpm: float | None = None) -> list[str]:
+    return [f"setcpm({bpm or g.bpm:g}/4)"] + (["samples({ " + ", ".join(f"bb_{k}: ['{u}']" for k, u in kit.items()) + " })"] if kit else [])
 
 
-def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, bass: str = BASS, hats: str = HAT) -> tuple[list[str], list[Piece], Callable[[str], str]]:
+def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, bass: str = BASS, hats: str = HAT,
+           late: bool = True) -> tuple[list[str], list[Piece], Callable[[str], str]]:
     """The beat's instruments: comment lines about the riff, the pieces in playing order, and a function
-    giving the kick for any kick pattern (mini-notation with "x" for a hit), so a song can vary it."""
+    giving the kick for any kick pattern (mini-notation with "x" for a hit; `boom=False` leaves out the
+    synth style's sine layer and `gain` is a `.gain(...)` for its 909 layer alone, for a roll), so a song can vary it. `late`:
+    move the riff and what follows it (the "riff" frame) onto the first bwom piece by piece; the song does
+    that to their arrangement as a whole instead."""
     use = [g.bars[i] for i in sel]
     kicks = _mini([["x" if c == "x" else "~" for c in bar["kick"]] for bar in use])
     head: list[str] = []
     out: list[Piece] = []
-    own = Piece("own", ["your own boom, layered under the kick"], f's("{kicks.replace("x", "bb_kick")}").gain({{gain}})') if kit and "kick" in kit else None
+    own = Piece("own", ["your own boom, layered under the kick" + (", its very top rolled off" if g.oscillator else "")],
+                f's("{kicks.replace("x", "bb_kick")}").gain({{gain}}){{fx}}') if kit and "kick" in kit else None
     drums = [[("sd" if bar["snare"][k] == "x" else "hh" if bar["hat"][k] == "x" else "~") for k in range(STEPS)] for bar in use]
     others = Piece("others", ["the other sounds you made"], f's("{_mini(drums)}").gain(.3)') if any(x != "~" for row in drums for x in row) else None
     steps = pulse(g, sel) if g.oscillator and style == "synth" else []
@@ -540,32 +616,64 @@ def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, ba
     if steps:
         evs = _rotate([riff_events(g, i, steps) for i in sel], steps[0])
         head.append(f"// your bwoms land on 16ths {' '.join(str(k + 1) for k in steps)} of each bar (counting from 1)")
-        late = f".late({steps[0]}/{STEPS})" if steps[0] else ""
+        late_s = f".late({steps[0]}/{STEPS})" if steps[0] and late else ""
         riff = _weighted(evs, lambda e: _name(e.note) if e.note is not None else "~")
         riff_up = _weighted(evs, lambda e: _name(e.note + 12) if e.note is not None else "~")
         sub = _weighted(evs, lambda e: _name(e.note - 12) if e.note is not None else "~")
         velocity = _weighted(evs, lambda e: f"{e.gain:g}")
         root = g.root if g.root is not None else 9
-        deep = _name(28 + (root - 28) % 12)                                    # E1..D#2, in the riff's key
         k_, b_ = SYNTH_KICK, BASSES[bass]
-        kick_of = lambda pat: (f's("{pat.replace("x", "sbd")}").note("{deep}").penv({k_["penv"]}).pdecay({k_["pdecay"]:g}).decay({k_["decay"]:g}).gain({k_["gain"]:g})'
-                               f'.duckorbit(2).duckattack({DUCK["attack"]:g}).duckdepth({DUCK["depth"]:g})')
-        out.append(Piece("kick", ["the boom: a deep kick in the riff's key, where you put yours. The sub ducks under it (duckorbit)"], kick_of(kicks)))
+        deep = _name(34 + (root - 34) % 12)                                    # the key's root in octave 1 (A#1 = 58 Hz)
+        duck = lambda o, d, a: f'.duckorbit({o}).duckattack({a:g}).duckdepth({d:g})'
+        bd = lambda pat: f's("{pat.replace("x", "bd")}").bank("{k_["bank"]}").speed({k_["speed"]:g}).gain({k_["gain"]:g})' + duck(2, *DUCK["sub"])
+        ghost = lambda pat, o, d, a: f's("{pat.replace("x", "bd")}").bank("{k_["bank"]}").gain(.001)' + duck(o, d, a)   # silent: only ducks its bus
+        ghosts = lambda pat: ", ".join([ghost(pat, 6, *DUCK["pad"]), ghost(pat, 4, *DUCK["top"]), ghost(pat, 5, *DUCK["kit"])])
+        kick_of = lambda pat, boom=True, gain="": (                         # `gain`: a .gain(...) for the 909 layer alone (the ghosts stay silent)
+            f'stack({bd(pat)}{gain}, s("{pat.replace("x", "sbd")}").note("{deep}").penv({BOOM["penv"]}).pdecay({BOOM["pdecay"]:g}).decay({BOOM["decay"]:g}).gain({BOOM["gain"]:g}), {ghosts(pat)})'
+            if boom else f'stack({bd(pat)}{gain}, {ghosts(pat)})')
+        out.append(Piece("kick", ["the boom: a 909 kick where you put yours, its tail tuned a 4th over the sub (speed), a short sine in the key sweeping down",
+                                  "an octave under it for weight, and three silent copies of it that only duck: the sub ducks hard, the pad, the stabs and",
+                                  "the hook by 9 dB, the hats and metal by 5, all breathing with the kick (duckorbit)"], kick_of(kicks)))
         out.append(Piece("riff", [
             f"the riff as the synth you were beatboxing: {b_['about']}. A note on each bwom, as loud as you",
-            "pushed it (velocity), the cutoff drifting a little over the bars (perlin), and an 8th-note echo",
-            "putting ghosts between the bwoms (delay; try delaysync(3/16) for a dub echo onto the next bwom).",
-            "The pattern starts on your first bwom and is moved there (late), so the last one rings on over",
-            "the bar line instead of striking again on the downbeat",
-            "(no reverb: Strudel's room effect does nothing, or silences the voice, in this editor)"],
-            b_["code"].format(riff=riff, riff_up=riff_up, gain=b_["gain"], vel=f'\n    .velocity("{velocity}")',
-                              echo=f'\n    .delay({ECHO["mix"]:g}).delaysync({ECHO["sync"]}).delayfeedback({ECHO["feedback"]:g})', late=late)))
-        out.append(Piece("sub", ["a sub an octave under it"], f'note("{sub}").s("sine").gain({SYNTH_SUB:g}).release(.05){late}.orbit(2)'))
+            "pushed it (velocity), the cutoff drifting a little over the bars (perlin). The pattern starts on",
+            "your first bwom and is moved there (late), so the last one rings on over the bar line instead of",
+            "striking again on the downbeat",
+            "- dry: the kick, sub and bass stay out of the rooms"],
+            b_["code"].format(riff=riff, riff_up=riff_up, gain=b_["gain"], vel=f'\n    .velocity("{velocity}")', late=late_s), frame="riff"))
+        out.append(Piece("sub", ["a sub an octave under it"], f'note("{sub}").s("sine").gain({SYNTH_SUB:g}).release(.05){late_s}.orbit(2)', frame="riff"))
         kick_steps = {k for bar in use for k in range(STEPS) if bar["kick"][k] == "x"}
-        accents = " ".join(f"{.5 if k in steps else .3 if k in kick_steps else .17:g}" for k in range(STEPS))   # the 808 tick is a quiet sample
+        house = " ".join(f"{.26 if k in OFFBEATS else .19 if k in steps else .15 if k in kick_steps else .1:g}" for k in range(STEPS))
+        pulse_ = " ".join(f"{.5 if k in steps else .3 if k in kick_steps else .17:g}" for k in range(STEPS))   # the 808 tick is a quiet sample
         h = HATS[hats]
-        out.append(Piece("hats", [f"the hats: {h['about']}"], h["code"].format(accents=f"[{accents}]")))
-        out += [x for x in (others, own) if x]
+        out.append(Piece("hats", [f"the hats: {h['about']}; the 909 kit sits on one bus (orbit 5): high-passed at 250, lightly ducked by the kick; the 16ths dry, centred"], h["code"].format(house=f"[{house}]", pulse=f"[{pulse_}]", swing=f"{SWING:g}")))
+        # not `own` here: the mouth boom under the 909 read as a rattle (measured 2026-10-29: a second knock 150 ms after
+        # every kick and 26 dB more 1-4 kHz than the 909 + sine boom); the "mouth" style still layers it
+        out += [x for x in (others,) if x]
+        # the song's harmony and hook, from the riff (not in the loop)
+        chords = harmony(evs, root)
+        names = sorted({_chord_name(c) for bar in chords for c, _ in bar})
+        per_step = [step_chords(riff_events(g, i, steps), root) for i in sel]
+        stabs = _mini([[_chord_name(c) if k in OFFBEATS else "~" for k, c in enumerate(row)] for row in per_step])
+        hook = _weighted(evs, lambda e: _name(e.note + 24) if e.note is not None else "~")
+        out.append(Piece("stabs", [f"chord stabs on the off-beat 8ths, each the chord over the bass note under it ({', '.join(names)}):",
+                                   "the harmony moves when the riff does, so they never clash with it. Detuned saws with a little drive, short with a",
+                                   "tail, no two hits alike (velocity); on the hook's bus (orbit 4): the same dotted-8th echo, quietly, and a short dark",
+                                   "room; ducked by the kick"],
+                         f'note("{stabs}").s("supersaw").unison(3).detune(.15).shape(.15).velocity(perlin.range(.8, 1).fast(2))\n'
+                         f'    .attack(.003).decay(.14).sustain(.08).release(.12).lpf(2200).lpq(.8).hpf(250).gain(.36)\n'
+                         f'    .delay(.12).delaysync(3/16).delayfeedback(.4).room({ROOM["stabs"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(4)', loop=False))
+        out.append(Piece("pad", ["the same chords held: a pad following the riff's harmony - plain saws (not the stabs' supersaw) with a slow vibrato",
+                                 "and a little drive, darker, high-passed above the bass's harmonics, a touch of room; on its own bus (orbit 6), ducked by the kick"],
+                         f'note("{_runs([[(_chord_name(c), n) for c, n in bar] for bar in chords])}").s("sawtooth").vib(.3).vibmod(.12).shape(.1)\n'
+                         f'    .attack(.2).decay(.2).sustain(.9).release(.35).lpf(800).hpf(320).gain(.07)\n'
+                         f'    .room({ROOM["pad"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(6){late_s}', loop=False, frame="riff"))
+        out.append(Piece("hook", ["the hook: the riff two octaves up in the bass's own voice - a driven saw plucked by its filter - so it reads as the",
+                                  "bass's answer; a dotted-8th echo on its own bus (orbit 4), a short room, a touch right; ducked by the kick"],
+                         f'note("{hook}").s("sawtooth").shape(.2).gain(.45)\n    .velocity("{velocity}")\n'
+                         f'    .lpf(perlin.range(1800, 2400).slow(3)).lpenv(2).lpattack(.003).lpdecay(.17).lpsustain(.2).lpq(1.5)\n'
+                         f'    .attack(.004).decay(.22).sustain(.3).release(.06).hpf(300).pan(.58)\n'
+                         f'    .delay(.25).delaysync(3/16).delayfeedback(.4).room({ROOM["hook"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(4){late_s}', loop=False, frame="riff"))
     elif g.oscillator:
         evs = [events(g, i, BRIGHT_SCALE) for i in sel]
         riff = _weighted(evs, lambda e: _name(e.note) if e.note is not None else "~")
@@ -576,7 +684,7 @@ def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, ba
         boom = _name(40 + (g.root - 40) % 12) if g.root is not None else "a#2"   # the boom, tuned to the riff's root
         flutter = g.voice.flutter
         o = OSC
-        kick_of = lambda pat: f's("{pat.replace("x", "sbd")}").note("{boom}").penv({KICK["penv"]}).pdecay({KICK["pdecay"]:g}).decay({KICK["decay"]:g}).gain({KICK_GAIN:g})'
+        kick_of = lambda pat, boom_=True, gain="": f's("{pat.replace("x", "sbd")}").note("{boom}").penv({KICK["penv"]}).pdecay({KICK["pdecay"]:g}).decay({KICK["decay"]:g}).gain({KICK_GAIN:g})' + gain
         out.append(Piece("kick", ["your booms: a short tone that sweeps down into the riff's root, like the one you made"], kick_of(kicks)))
         out.append(Piece("osc", [
             "the oscillator: your riff on a stack of detuned saws. Each note is as loud as you pushed it",
@@ -592,7 +700,7 @@ def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, ba
     else:
         hats = [[("hh" if bar["hat"][k] == "x" else "~") for k in range(STEPS)] for bar in use]
         snares = [[("sd" if bar["snare"][k] == "x" else "~") for k in range(STEPS)] for bar in use]
-        kick_of = lambda pat: f's("{pat.replace("x", "bd")}").gain(1.1)'
+        kick_of = lambda pat, boom=True, gain="": f's("{pat.replace("x", "bd")}").gain(1.1)' + gain
         out.append(Piece("kick", ["your booms"], kick_of(kicks)))
         if any(x != "~" for row in snares for x in row):
             out.append(Piece("yourSnares", ["your snares"], f's("{_mini(snares)}").gain(.8)'))
@@ -602,15 +710,18 @@ def pieces(g: Groove, kit: dict[str, str] | None, sel: list[int], style: str, ba
             out.append(own)
     for x in out:
         if x.name == "own":
-            x.code = x.code.replace("{gain}", ".25" if g.oscillator else ".5")
+            x.code = x.code.replace("{gain}", ".2" if g.oscillator else ".5").replace("{fx}", ".lpf(6000)" if g.oscillator else "")
     return head, out, kick_of
 
 
-def _options(g: Groove, style: str) -> list[str]:
+def _options(g: Groove, style: str, extras: list[Piece] = ()) -> list[str]:
     """Pieces not in the beatbox, as commented lines to uncomment."""
     if g.oscillator and style == "synth":
-        return ["// not in your beatbox - uncomment to add a backbeat, or the off-beat open hat:",
-                f'// , s("~ cp ~ cp").bank("{DRUM_BANK}").gain(.35)', f'// , s("[~ oh]*4").bank("{DRUM_BANK}").gain(.18)']
+        out = ["// not in your beatbox - uncomment to add the off-beat open hat, or a backbeat:",
+               f'// , s("[~ oh]*4").bank("{DRUM_BANK}").gain(.2)', f'// , s("~ cp ~ cp").bank("{DRUM_BANK}").gain(.35)']
+        for x in extras:
+            out += ["// " + x.about[0]] + ["// , " + x.code.replace("\n    ", "")]
+        return out
     if g.oscillator:
         return ["// not in your beatbox - uncomment to add a backbeat:", '// , s("~ cp ~ cp").gain(.35)']
     if not g.snare_played:
@@ -621,90 +732,117 @@ def _options(g: Groove, style: str) -> list[str]:
 def strudel(g: Groove, name: str = "beatbox", kit: dict[str, str] | None = None, bars: list[int] | None = None,
             style: str = "synth", bass: str = BASS, hats: str = HAT) -> str:
     """The groove as a Strudel loop. With a pitched part, in the "synth" style: the riff as the synth it stands
-    for, on the pulse of its bwoms, on one of the BASSES, with HATS, over a deep kick the sub ducks under;
-    in the "mouth" style: the riff on detuned saws with filter and loudness moving note by note the way the
-    mouth moved them, a sub an octave under, and the kicks as booms like the ones made. Without a pitched
-    part: the kicks, snares and hats on drum-machine sounds."""
+    for, on the pulse of its bwoms, on one of the BASSES, with HATS, over a 909 kick the sub ducks under (the
+    song's chord stabs, pad and hook as commented lines); in the "mouth" style: the riff on detuned saws with
+    filter and loudness moving note by note the way the mouth moved them, a sub an octave under, and the kicks
+    as booms like the ones made. Without a pitched part: the kicks, snares and hats on drum-machine sounds."""
     sel = bars if bars is not None else loop(g)
     head, ps, _ = pieces(g, kit, sel, style, bass, hats)
     lines = [f'// "{name}": your beatbox as a beat', f"// {g.bpm:g} BPM, {len(sel)} bar{'s' if len(sel) > 1 else ''}, looped"]
     lines += head + [""] + _setup(g, kit) + ["", "stack("]
     for x in ps:
-        lines += [f"  // {a}" for a in x.about] + ["  " + x.code + ","]
+        if x.loop:
+            lines += [f"  // {a}" for a in x.about] + ["  " + x.code + ","]
     lines[-1] = lines[-1].rstrip(",")
-    lines += ["  " + o for o in _options(g, style)] + [")"]
+    lines += ["  " + o for o in _options(g, style, [x for x in ps if not x.loop])] + [")"]
     return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- the song
 
 # The form: (bars, what happens, the pieces that play). "lead" is the riff (or the mouth's oscillator), "drums"
-# any other sounds beatboxed; the rest are the song's own pieces (hats, a riser, crashes). ("pull",
-# [...]) takes those pieces out after two beats of the section's last bar, ("end", [...]) leaves them one hit
-# there. A section nothing of which exists falls back to the drums, then to silence
-SONG = [
-    (8, "intro: your boom alone (and the samples warming up, silently)", ["kick", "own", "preload"]),
-    (8, "intro: the sub joins", ["kick", "own", "sub", "drums"]),
-    (8, "build: the riff comes in quiet, low and dry, opening up", ["kick", "own", "sub", "drums", "leadLow"]),
-    (8, "build: the riff opens up over a riser and a reverse crash; everything pulls out before the drop",
-     [("pull", ["kick", "sub", "drums", "leadRise"]), "riser", "rcrash"]),
-    (24, "drop: the hats come in, a rim answers the bass, a rave stab on the off-beats; every 8th bar the kick skips beat 4 and the riff's echo is thrown long",
-     ["kickHole", "own", "sub", "drums", "leadThrow", "hats", "ohat", "rim", "stab"]),
-    (8, "breakdown: the riff alone, echoing", ["leadEcho"]),
-    (8, "breakdown: the sub and a riser come back, the kick rolls in", ["kickReturn", "sub", "drums", "leadEcho2", "riser", "rcrash"]),
-    (24, "drop: the same, plus a ride, the stab's filter opening across every 8 bars", ["kickHole", "own", "sub", "drums", "leadThrow", "hats", "ohat", "rim", "ride", "stabSweep"]),
-    (8, "outro: the riff and hats out, one last hit", [("end", ["kick", "sub", "drums"])]),
+# any other sounds beatboxed; the rest are the song's own pieces (hats, harmony, the hook, a riser, crashes).
+# ("pull", [...]) takes those pieces out after two beats of the section's last bar, ("end", [...]) leaves them one
+# hit there. A section nothing of which exists falls back to the drums, then to silence. 8-bar phrases, something
+# new in each; nothing ticking (hats, shaker) before the first drop; no claps
+SONG = [                          # 16 | 16 | 16 | 16 | 32 | 16: every big change on a 16-bar line, as a DJ counts
+    (8, "intro: your boom alone (and the samples warming up, silently): a DJ's mix-in", ["kick", "own", "preload"]),
+    (8, "intro: the sub and the riff join, the riff quiet, low and dry", ["kick", "own", "sub", "drums", "leadLow"]),
+    (8, "build: a pad takes up the riff's chords underneath, both opening up", ["kick", "own", "sub", "drums", "leadMid", "padLow"]),
+    (8, "build: the riff gets louder and opens up, the pad too, over a riser and a reverse crash; kick, sub and riff pull out before the drop",
+     [("pull", ["kick", "sub", "drums", "leadRise"]), "padOpen", "riser", "rcrash"]),
+    (8, "drop: the hats and the open hat come in; every 8th bar the kick skips beat 4", ["kickHole", "own", "sub", "drums", "lead", "hats", "ohat"]),
+    (8, "drop: chord stabs on the off-beats, following the bass", ["kickHole", "own", "sub", "drums", "lead", "hats", "ohat", "stabs"]),
+    (8, "breakdown: no kick - the pad holds the chords, the riff echoes, opening upward", ["padOpen", "leadEcho"]),
+    (8, "breakdown: the sub comes back under it, the pad swells, a riser, the kick rolls in over two bars", ["kickReturn", "sub", "drums", "leadEcho2", "padSwell", "riser", "rcrash"]),
+    (8, "drop 2: the stabs back, a ride on the bwoms, the hook answering in the last two bars of the phrase", ["kickHole", "own", "sub", "drums", "lead", "hats", "ohat", "stabs", "ride", "hookAnswer"]),
+    (8, "drop 2: the hook all the way through; the hats drop out for the last bar", ["kickHole", "own", "sub", "drums", "lead", "hatsBreak", "ohat", "stabs", "ride", "hook"]),
+    (8, "drop 2: the stabs' filter opening across the phrase; kick and hats drop out for two beats before the peak",
+     [("pull", ["kick", "own", "hats"]), "sub", "drums", "lead", "ohat", "stabsOpen", "ride", "hook"]),
+    (8, "drop 2: the pad under it all, the riff's filter open - the peak", ["kickHole", "own", "sub", "drums", "leadOpen", "hats", "ohat", "stabsOpen", "ride", "hook", "padPeak"]),
+    (8, "outro: hook, stabs and pad out; the beat and the riff", ["kick", "own", "sub", "drums", "lead", "hats", "ohat"]),
+    (8, "outro: the kick and the sub, one last hit together", [("end", ["kick", "subEnd", "drums"])]),
 ]
 
 
 def song(g: Groove, name: str = "beatbox", kit: dict[str, str] | None = None, bars: list[int] | None = None,
          style: str = "synth", bass: str = BASS, hats: str = HAT, form: list[tuple[int, str, list[str]]] = SONG) -> str:
-    """The beat as a track: the pieces as `const`s, variations of them for the form (the riff filtered and
-    opening, echoing alone, the kick pulling out and rolling back in, a noise riser), and the form itself as
-    `arrange(...)`, section by section."""
+    """The beat as a track at TEMPO: the pieces as `const`s - the beat's, plus the harmony the riff implies
+    (chord stabs on the off-beats and a pad, each chord the one over the bass note under it) and a hook (the
+    riff two octaves up, echoing) - variations of them for the form (the riff and the pad filtered and opening,
+    the riff echoing alone, the kick skipping a beat or rolling back in, a noise riser, a reversed crash, a ride
+    on the bwoms, a shaker), and the form itself as `arrange(...)`, section by section."""
     sel = bars if bars is not None else loop(g)
-    head, ps, kick_of = pieces(g, kit, sel, style, bass, hats)
+    head, ps, kick_of = pieces(g, kit, sel, style, bass, hats, late=False)
     have = {x.name for x in ps}
     lead = "riff" if "riff" in have else "osc" if "osc" in have else None
     drums = [n for n in ("others", "yourSnares", "yourHats") if n in have]       # the sounds beatboxed, not the song's hats
-    bar_s = 4 * 60 / g.bpm
-    var = [Piece("kickReturn", ["silent, then a roll of 8ths in the last bar of 8, bringing the beat back"],
-                 kick_of("[x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~]") + '.gain(.45).mask("<0 0 0 0 0 0 0 1>")')]
+    bpm = TEMPO if style == "synth" and g.oscillator else g.bpm
+    bar_s = 4 * 60 / bpm
     steps = pulse(g, sel) if g.oscillator else []
-    rims = [k for k in (2, 6, 10, 14) if k not in steps] or [6, 14]        # the off-beat 8ths the bass leaves empty
-    var.append(Piece("rim", [f"a rimshot on 16ths {' and '.join(str(k + 1) for k in rims)}: the off-beats between the bwoms, answering the bass"],
-                     f's("{_mini([["rim" if k in rims else "~" for k in range(STEPS)]])}").bank("{DRUM_BANK}").gain(.25)'))
+    shift = f"{steps[0]}/{STEPS}" if lead == "riff" and steps and steps[0] else ""   # the riff frame's move onto the first bwom
+    fr = "riff" if shift else "beat"
+    var = [Piece("kickReturn", ["silent, then a roll of 8ths over the last two bars of 8, getting louder: the beat coming back"],
+                 kick_of("[x ~ x ~ x ~ x ~ x ~ x ~ x ~ x ~]", False, '.gain("<.35 .45>")') + '.mask("<0 0 0 0 0 0 1 1>")'),
+           Piece("kickHole", ["the kick, skipping beat 4 of every 8th bar: a hole, techno's fill"], 'kick.lastOf(8, x => x.mask("1 1 1 0"))')]
     if lead:
-        var.append(Piece(f"{lead}Throw", ["the riff; in the last bar of every 8 its last beat goes to its own echo (orbit 3): 5/16ths apart, so the",
-                                           "repeats fall between the next bar's bwoms, rolling across it"],
-                         f'stack({lead}.mask("<1 1 1 1 1 1 1 [1 1 1 0]>"), {lead}.mask("<0 0 0 0 0 0 0 [0 0 0 1]>").delay(.8).delaysync(5/16).delayfeedback(.8).orbit(3))'))
-        r = 48 + (g.root if g.root is not None else 9)                     # the key's root in octave 3
-        var += [Piece("stab", ["a rave stab: a 5th chord in your key on detuned saws, short, on the off-beat 8ths"],
-                      f'note("[~ [{_name(r)},{_name(r + 7)},{_name(r + 12)}]]*4").s("supersaw").unison(5).detune(.2)'
-                      '.attack(.005).decay(.14).sustain(0).release(.04).hpf(200).lpf(2200).lpq(2).gain(.15)'),
-                Piece("stabSweep", ["the stab, its filter opening over every 8 bars"], 'stab.lpf(saw.range(1200, 3500).slow(8))')]
         full = BASSES[bass]["gain"] if lead == "riff" else OSC["gain"]
-        var += [Piece(f"{lead}Low", ["quieter, low and dry, the filter opening over 8 bars"], f"{lead}.gain({full * .6:.2g}).lpf(saw.range(200, 600).slow(8)).delay(0)"),
-                Piece(f"{lead}Rise", ["opening further and getting louder"],
-                      f"{lead}.gain(saw.range({full * .6:.2g}, {full:g}).slow(8)).lpf(saw.range(600, 2400).slow(8))"),
-                Piece(f"{lead}Echo", ["a little quieter, a dub echo onto the next bwom, nothing under it"], f"{lead}.gain({full * .8:.2g}).delay(.5).delaysync(3/16).delayfeedback(.5).lpf(saw.range(300, 900).slow(8))"),
-                Piece(f"{lead}Echo2", ["the echo opening up toward the drop"], f"{lead}.delay(.5).delaysync(3/16).delayfeedback(.5).lpf(saw.range(900, 3000).slow(8))")]
+        var += [Piece(f"{lead}Low", ["quieter, the filter low, opening a little over 8 bars"], f"{lead}.gain({full * .6:.2g}).lpf(saw.range(200, 320).slow(8))", frame=fr),
+                Piece(f"{lead}Mid", ["opening further"], f"{lead}.gain({full * .75:.2g}).lpf(saw.range(320, 420).slow(8))", frame=fr),
+                Piece(f"{lead}Rise", ["opening to where it plays in the drop, getting louder"],
+                      f"{lead}.gain(saw.range({full * .75:.2g}, {full:g}).slow(8)).lpf(saw.range(420, 560).slow(8))", frame=fr),
+                Piece(f"{lead}Echo", ["a little quieter, a dub echo onto the next bwom on its own bus (orbit 3), the filter opening upward: air, not mud"],
+                      f"{lead}.gain({full * .8:.2g}).delay(.5).delaysync(3/16).delayfeedback(.5).lpf(saw.range(600, 1200).slow(8)).orbit(3)", frame=fr),
+                Piece(f"{lead}Echo2", ["the echo opening further toward the drop"], f"{lead}.delay(.5).delaysync(3/16).delayfeedback(.5).lpf(saw.range(1200, 2500).slow(8)).orbit(3)", frame=fr)]
+    if "pad" in have:
+        var += [Piece("padLow", ["the pad quiet and dark, opening over 8 bars"], "pad.gain(.06).lpf(saw.range(300, 600).slow(8))", frame=fr),
+                Piece("padOpen", ["the pad opening up"], "pad.lpf(saw.range(600, 1400).slow(8))", frame=fr),
+                Piece("padSwell", ["the pad opening wide and getting louder, toward the drop"], "pad.gain(saw.range(.07, .1).slow(8)).lpf(saw.range(1000, 2600).slow(8))", frame=fr),
+                Piece("stabsOpen", ["the stabs, their filter opening over every 8 bars, brighter than before"], "stabs.lpf(saw.range(1500, 6000).slow(8))"),
+                Piece("hookAnswer", ["the hook in the last two bars of every 8: an answer to the riff"], 'hook.mask("<0 0 0 0 0 0 1 1>")', frame=fr),
+                Piece("padPeak", ["the pad louder and opening wider, under the peak"], "pad.gain(.14).lpf(saw.range(900, 2200).slow(8))", frame=fr),
+                Piece(f"{lead}Open", ["the riff's filter opened up, for the peak"], f"{lead}.lpf(perlin.range(600, 900).slow(4))", frame=fr)]
+    if lead:
+        deep = _name(34 + ((g.root if g.root is not None else 9) - 34) % 12)
+        var += [Piece("hatsBreak", ["the hats, out for the last bar of 8"], 'hats.mask("<1 1 1 1 1 1 1 0>")'),
+                Piece("subEnd", ["the sub's root on the beat frame, so the last hit lands with the kick"],
+                      f'note("{deep}").s("sine").gain({SYNTH_SUB:g}).attack(.001).decay(.8).sustain(0).release(.1).orbit(2)' if lead == "riff" else "sub")]
     t = 8 * bar_s * RISER_CLIP
-    var += [Piece("riser", ["8 bars of pink noise, a band of it sweeping up (a whoosh, not static) and swelling"
+    ride = _mini([["rd" if k in steps else "~" for k in range(STEPS)]]) if steps else '[~ rd]*4'
+    shaker = " ".join(f"{.6 if k in OFFBEATS else .36 if k % 2 else .24:g}" for k in range(STEPS))
+    var += [Piece("riser", ["8 bars of pink noise swelling the whole way, its low edge sweeping up from 800 Hz (a whoosh, not static), centred: one 8-bar event,",
+                            "so a patterned pan would be sampled once at its onset"
                             + (f", stopping {8 * (1 - RISER_CLIP):.2g} bars early" if RISER_CLIP < 1 else "")],
                   f's("pink").slow(8)' + (f".clip({RISER_CLIP:g})" if RISER_CLIP < 1 else "")
-                  + f'.hpf(150).hpenv(3).hpattack({t * .95:.3g}).hpsustain(1).lpf(600).lpenv(3).lpattack({t * .95:.3g}).lpsustain(1).attack({t * .9:.3g}).gain(.18)'),
-            Piece("ohat", ["an open hat on the off-beats"], f's("[~ oh]*4").bank("{DRUM_BANK}").gain(.14)'),
-            Piece("rcrash", ["a reversed crash swelling into the downbeat after the last bar of 8"], 's("cr").speed(-1).gain(.6).late(9/16).mask("<0 0 0 0 0 0 0 1>")'),
-            Piece("kickHole", ["the kick, skipping beat 4 of every 8th bar: a hole, techno's fill"], 'kick.lastOf(8, x => x.mask("1 1 1 0"))'),
-            Piece("ride", ["a ride on the off-beat 8ths, quiet"], f's("[~ rd]*4").bank("{DRUM_BANK}").gain(.12)'),
-            Piece("preload", ["the samples, triggered silently once so their first real hit isn't lost to loading"],
-                  f'stack(s("cr").gain(.001), s("oh rim rd").bank("{DRUM_BANK}").gain(.001), s("hh").bank("{HATS[hats]["bank"]}").gain(.001)).mask("<1 0 0 0 0 0 0 0>")')]
+                  + f'.hpf(800).hpenv(2).hpattack({t * .95:.3g}).hpsustain(1).lpf(9000).attack({t * .95:.3g}).gain(.3).pan(.5)'),
+            Piece("ohat", ["an open hat on the off-beat 8ths: house's backbone with the kick; a touch left, in the kit's room"],
+                  f's("[~ oh]*4").bank("{DRUM_BANK}").gain(.13).hpf(250).lpf(10000).pan(.4).room({ROOM["ohat"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(5)'),
+            Piece("rcrash", ["a reversed crash swelling into the downbeat after the last bar of 8, in the kit's room"],
+                  f's("cr").speed(-1).gain(.6).late(9/16).mask("<0 0 0 0 0 0 0 1>").pan(.55).room({ROOM["crash"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(5)'),
+            Piece("ride", ["a ride on the bwoms, quiet: the riff's pulse on metal; a touch right, in the kit's room"],
+                  f's("{ride}").bank("{DRUM_BANK}").gain(.12).hpf(250).lpf(10000).pan(.62).room({ROOM["ride"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(5)'),
+            Piece("shaker", ["a shaker in 16ths, accented on the off-beats, swung with the hats, its top rolled off; not in the form (Dirt's shaker is a 10 kHz tick, inaudible under the hats at any sane level) - add it to a section if you want it"],
+                  f's("sh*16").gain("[{shaker}]").late("[0 {SWING:g}]*8").lpf(7000).degradeBy(.1).orbit(5)'),
+            Piece("preload", ["the samples and the rooms, triggered silently once so their first real hit isn't lost to loading"],
+                  f'stack(s("cr sh").gain(.001), s("bd oh rd hh").bank("{DRUM_BANK}").gain(.001).room({ROOM["ohat"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit(5)'
+                  + (f', s("hh").bank("{HATS[hats]["bank"]}").gain(.001)' if HATS[hats]["bank"] != DRUM_BANK else "")
+                  + f', note("a#3 a#3").s("sawtooth").gain(.001).room({ROOM["stabs"]:g}).roomsize({ROOM["size"]:g}).roomlp({ROOM["lp"]}).orbit("6 4")).mask("<1 0 0 0 0 0 0 0>")')]
     have |= {x.name for x in var}
     total = sum(n for n, _, _ in form)
     secs = total * bar_s
-    lines = [f'// "{name}": your beatbox as a track', f"// {total} bars, {int(secs // 60)}:{int(secs % 60):02d} at {g.bpm:g} BPM - "
-             + ", ".join(dict.fromkeys(t.split(":")[0] for _, t, _ in form))] + head + [""] + _setup(g, kit) + ["", "// the pieces"]
+    lines = [f'// "{name}": your beatbox as a track', f"// {total} bars, {int(secs // 60)}:{int(secs % 60):02d} at {bpm:g} BPM"
+             + (f" (your take: {g.bpm:g})" if bpm != g.bpm else "") + " - " + ", ".join(dict.fromkeys(t.split(":")[0] for _, t, _ in form))]
+    lines += head + [""] + _setup(g, kit, bpm) + ["", "// the pieces"]
     for x in ps:
         lines += [f"// {a}" for a in x.about] + [f"const {x.name} = {x.code}"]
     lines.append("")
@@ -712,28 +850,36 @@ def song(g: Groove, name: str = "beatbox", kit: dict[str, str] | None = None, ba
     for x in var:
         lines.append(f"const {x.name} = {x.code}   // {'; '.join(x.about)}")
     lines += ["", "// in the last bar of 8: out after two beats (before a drop), or one hit (the end)",
-              'const pull = p => p.lastOf(8, x => x.mask("1 1 0 0"))', 'const end = p => p.lastOf(8, x => x.mask("1 0 0 0"))',
-              "", "// the form: bars, what plays", "arrange("]
+              'const pull = p => p.lastOf(8, x => x.mask("1 1 0 0"))', 'const end = p => p.lastOf(8, x => x.mask("1 0 0 0"))', ""]
+    frames = {x.name: x.frame for x in ps + var}
 
-    def resolve(layers: list) -> list[str]:
+    def resolve(layers: list, frame: str) -> list[str]:
         names = []
         for layer in layers:
             if isinstance(layer, tuple):
-                inner = resolve(layer[1])
+                inner = resolve(layer[1], frame)
                 names += [f"{layer[0]}(stack({', '.join(inner)}))"] if inner else []
                 continue
             layer = layer.replace("lead", lead) if lead and layer.startswith("lead") else layer
-            names += drums if layer == "drums" else [layer] if layer in have else []
+            names += [n for n in (drums if layer == "drums" else [layer] if layer in have else []) if frames[n] == frame]
         return names
 
-    at = 1
-    for n, title, layers in form:
-        names = resolve(layers) or drums
-        expr = f"stack({', '.join(names)})" if names else "silence"
-        lines.append(f"  [{n}, {expr}],".ljust(70) + f"// {at}-{at + n - 1}: {title}")
-        at += n
-    lines[-1] = lines[-1].replace("],", "] ", 1)
-    lines.append(")")
+    def rows(frame: str, indent: str) -> list[str]:
+        out, at = [], 1
+        for n, title, layers in form:
+            names = resolve(layers, frame) or (drums if frame == "beat" else [])
+            expr = f"stack({', '.join(names)})" if len(names) > 1 else names[0] if names else "silence"
+            out.append(f"{indent}[{n}, {expr}],".ljust(70 + len(indent)) + f"// {at}-{at + n - 1}" + (f": {title}" if frame == "beat" else ""))
+            at += n
+        out[-1] = out[-1].replace("],", "] ", 1)
+        return out
+
+    if shift:
+        lines += ["// the form: bars, what plays. The riff and what follows it (sub, pad, hook) are arranged apart and moved onto the",
+                  "// first bwom as a whole (late), so a note ringing over a bar line isn't cut off where a section begins",
+                  "stack(", "  arrange("] + rows("beat", "    ") + ["  ),", "  arrange("] + rows("riff", "    ") + [f"  ).late({shift})", ")"]
+    else:
+        lines += ["// the form: bars, what plays", "arrange("] + rows("beat", "  ") + [")"]
     return "\n".join(lines) + "\n"
 
 

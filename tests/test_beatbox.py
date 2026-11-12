@@ -109,10 +109,13 @@ def test_oscillator_riff_becomes_the_lead(tmp_path):
     bar = beatbox.loop(g)[0]
     assert sum(n is not None and n % 12 == r % 12 for n, r in zip(g.voice.notes[bar], RIFF)) >= 13
     assert all(h.kind in ("kick", "voice") for h in g.hits)  # its articulations aren't hats or snares
-    for style, osc in (("synth", 'gm_synth_bass_2")'), ("mouth", 'supersaw")')):
+    for style, osc, kick in (("synth", 'sawtooth")', '.bank("RolandTR909")'), ("mouth", 'supersaw")', "sbd ~")):
         code = beatbox.strudel(g, "osc", style=style)
-        assert f's("{osc}' in code and "sbd" in code                            # the riff on a bass, a tuned kick
-        assert "a#2" in code and "b2" in code and "g#2" in code and ".room(" not in code
+        assert f's("{osc}' in code and kick in code                             # the riff on a bass; a 909 kick, or a tuned boom
+        assert "a#2" in code and "b2" in code and "g#2" in code
+        for line in code.splitlines():
+            if line.lstrip().startswith(("s(\"<[bd", "stack(s(\"<[bd", "s(\"<[sbd", "note(\"<[a#2", "note(\"<[a#1")):
+                assert ".room(" not in line                                              # kick, bass and sub stay dry
         assert code.count("(") == code.count(")")
     assert 'note("a#2")' in beatbox.strudel(g, "osc", style="mouth")             # a boom where the mouth's was
 
@@ -127,18 +130,23 @@ def test_synth_style_plays_the_riff_on_its_pulse(tmp_path):
     assert {e.step for e in evs if e.length > 1} <= set(steps) | {0}            # notes start on the bwoms
     assert [e.note % 12 for e in evs if e.step == 5][0] == RIFF[5] % 12          # at the pitch sung there
     code = beatbox.strudel(g, "osc")
-    assert 'note("a#1")' in code and "duckorbit(2)" in code                    # a deep kick the sub ducks under
-    lead = next(line for line in code.splitlines() if 's("gm_synth_bass_2")' in line)
+    assert 'stack(s("<[bd ' in code and '.bank("RolandTR909")' in code and 's("<[sbd ' in code and "duckorbit(2)" in code and code.count("gain(.001).duckorbit(") >= 3   # a 909 kick with a tuned boom under it; the sub ducked from it, three buses from silent copies
+    lead = next(line for line in code.splitlines() if 's("sawtooth")' in line)
     assert ".late(2/16)" in code and lead.startswith('  note("<[a#2@3 ')          # the riff starts on its first bwom
-    assert "perlin.range(" in code and ".delaysync(" in code                     # drifting cutoff, echoes between the bwoms
-    for bass, sound in (("bright", 'gm_synth_bass_1'), ("fm", '.fm('), ("pluck", 's("triangle")'), ("finger", 'gm_electric_bass_finger')):
+    body = code[code.index(lead):code.index("// a sub")]
+    assert "perlin.range(" in body and ".lpenv(2.2)" in body and ".lpattack(.006)" in body and ".lpdecay(" in body and ".delay(" not in body   # plucked by its filter, dry
+    for bass, sound in (("square", 's("square")'), ("fm", '.fm('), ("synth", 'gm_synth_bass_2'), ("bright", 'gm_synth_bass_1'), ("finger", 'gm_electric_bass_finger')):
         other = beatbox.strudel(g, "osc", bass=bass)
         assert sound in other and other.count("(") == other.count(")")
-    assert set(beatbox.BASSES) == {"synth", "bright", "fm", "pluck", "finger"}
-    assert 'bank("RolandTR808").gain("[' in code                                   # the hats ride the riff's pulse
+    assert set(beatbox.BASSES) == {"saw", "square", "fm", "synth", "bright", "finger"}
     hats_line = next(line for line in code.splitlines() if 's("hh*16")' in line)
-    assert hats_line.count("0.5") == 5 and "0.3" in hats_line                      # loud on the 5 bwoms, medium on the kicks
+    assert 'bank("RolandTR909").gain("[' in hats_line and f'.late("[0 {beatbox.SWING:g}]*8")' in hats_line    # 909 16ths, swung
+    gains = re.search(r'gain\("\[(.*?)\]"\)', hats_line).group(1).split()
+    assert gains.count("0.26") == 4 and gains.count("0.19") == 3                    # accented on the off-beats, then the bwoms (3 aren't off-beats)
+    pulse_line = next(line for line in beatbox.strudel(g, "osc", hats="pulse").splitlines() if 's("hh*16")' in line)
+    assert 'bank("RolandTR808")' in pulse_line and pulse_line.count("0.5") == 5     # the 808 tick, loud on the bwoms
     assert 's("[~ hh]*4")' in beatbox.strudel(g, "osc", hats="offbeat")
+    assert "// , note(" in code and "[a#3,c#4,f4]" in code                       # the song's stabs, pad and hook: commented in the loop
     assert "duckorbit" not in beatbox.strudel(g, "osc", style="mouth")
     song = midifile.read(beatbox.write_midi(g, tmp_path / "beat.mid", repeats=2))
     assert {n.channel for n, _ in song.notes} == {0, 1, 9}
@@ -150,23 +158,52 @@ def test_song_lays_the_beat_out_as_a_track(tmp_path):
     g = beatbox.groove(oscillator_take(tmp_path / "osc.wav"))
     for style, lead in (("synth", "riff"), ("mouth", "osc")):
         code = beatbox.song(g, "osc", style=style)
-        assert code.count("(") == code.count(")") and ".room(" not in code
+        assert code.count("(") == code.count(")")
         assert f"const {lead} = " in code and "const sub = " in code and "const riser = " in code
         form = code[code.index("arrange("):]
-        assert sum(int(n) for n in re.findall(r"^\s*\[(\d+),", form, re.M)) == sum(n for n, _, _ in beatbox.SONG)
+        assert sum(int(n) for n in re.findall(r"^\s*\[(\d+),", form, re.M)) == sum(n for n, _, _ in beatbox.SONG) * form.count("arrange(")
         assert f"{lead}Low" in form and f"{lead}Echo" in form and "pull(stack(" in form and "kickReturn" in form and "end(stack(" in form
         assert "rcrash" in form and "crash" in form and "preload" in form
         assert 's("cp' not in code and "cp*" not in code                                            # no claps anywhere
         assert 's("pink")' in code and 's("white")' not in code                   # the riser: a whoosh, not static
-        drop = f"stack(kickHole, sub, {lead}Throw, hats, ohat, rim, stab)" if style == "synth" else f"stack(kickHole, sub, {lead}Throw, ohat, rim, stab)"
-        assert drop in form and "stabSweep" in form and "ride" in form             # the drop: the loop plus techno's movement
+        stacks = re.findall(r"\[\d+, (.*?)\],?\s*//", form)
+        if style == "synth":
+            assert f"setcpm({beatbox.TEMPO:g}/4)" in code and f"(your take: {g.bpm:g})" in code   # the song at club tempo
+            assert code.count("arrange(") == 2 and ").late(2/16)" in form and ".late(2/16)" not in code[:code.index("arrange(")]
+            assert "stack(kickHole, hats, ohat)" in form and "stack(kickHole, hats, ohat, stabs)" in form       # the beat's frame...
+            assert "stack(sub, riff)" in form and "stack(sub, riff, hookAnswer)" in form and "stack(sub, riffOpen, hook, padPeak)" in form   # ...and the riff's, shifted as a whole
+            assert "hatsBreak" in form and "pull(stack(kick, hats))" in form and "end(stack(kick, subEnd))" in form   # drop-outs; the last hit lands together
+            assert "stabsOpen, ride)" in form and "shaker" not in form               # the drops build up, piece by piece (the shaker is defined, not used)
+            assert "const stabs = note(" in code and "[a#3,c#4,f4]" in code and "[b3,d#4,f#4]" in code   # chords from the riff: i and bII
+            assert "const pad = note(" in code and "const hook = note(" in code and "a#4@" in code       # the pad, the hook two octaves up
+            blocks = re.findall(r"^const (\w+) = (.*?)(?=^const |^//|^\n)", code, re.M | re.S)   # each const with its continuation lines
+            rooms = {name for name, body in blocks if ".room(" in body}
+            assert {"stabs", "pad", "hook", "ohat", "ride", "rcrash"} <= rooms and not {"kick", "sub", "riff", "kickReturn", "hats"} & rooms   # rooms on the top, not the low end or the 16ths
+            assert ".orbit(6)" in code and ".orbit(4)" in code and ".orbit(5)" in code and "speed(0.95)" in code and "duckorbit(1)" not in code   # orbit 1 is the default bus: the kick
+            first = next(x for x in stacks if "hats" in x)
+            assert all("hats" not in x and "shaker" not in x and "ride" not in x for x in stacks[:stacks.index(first)])   # nothing ticking before the drop
+        else:
+            assert f"setcpm({g.bpm:g}/4)" in code and "stack(kickHole, sub, osc, ohat)" in form
         assert 'mask("<0 0 0 0 0 0 0 0 1' not in code and "sd" not in code and "lt mt" not in code   # no crash hits, snare or tom fills: not this track's vibe
-        builds = [x for x in re.findall(r"\[\d+, (.*?)\],?\s*//", form) if "Low" in x or "Rise" in x or "Echo2" in x]
+        builds = [x for x in stacks if "Low" in x or "Rise" in x or "Echo2" in x]
         assert builds and not any("hats" in x or "roll" in x for x in builds)     # nothing ticking before a drop
+    total = sum(n for n, _, _ in beatbox.SONG)
+    assert total % 8 == 0 and abs(total * 4 * 60 / beatbox.TEMPO - 210) < 15         # 8-bar phrases, about 3½ minutes
     drums = beatbox.groove(beatbox_take(tmp_path / "bb.wav"))
     code = beatbox.song(drums, "bb")
     stacks = re.findall(r"\[\d+, (.*?)\],?\s*//", code[code.index("arrange("):])       # what plays, without the comments
     assert stacks and not any("riff" in x or "silence" in x for x in stacks) and any("yourHats" in x for x in stacks)
+
+
+def test_harmony_follows_the_bass():
+    root = 10                                                                      # A#: the riff's key
+    assert beatbox.chord(46, root) == (58, 61, 65)                                 # A#2 -> A#m, voiced a#3 c#4 f4
+    assert beatbox.chord(47, root) == (59, 63, 66) and beatbox.chord(44, root) == (59, 63, 68)   # B -> B major (bII), G# -> G#m (bVII)
+    assert beatbox.chord(45, root) is None                                         # A natural: a passing note, no chord
+    E = beatbox.Event
+    bar = [E(0, 3, 46, 1, 0, 0), E(3, 3, 46, 1, 0, 0), E(6, 3, 47, 1, 0, 0), E(9, 2, 44, 1, 0, 0), E(11, 1, 45, .8, 0, 0), E(12, 4, 46, 1, 0, 0)]
+    assert beatbox.harmony([bar], root) == [[((58, 61, 65), 6), ((59, 63, 66), 3), ((59, 63, 68), 3), ((58, 61, 65), 4)]]   # merged; the pickup keeps G#m
+    assert beatbox.step_chords(bar, root)[11] == (59, 63, 68) and len(beatbox.step_chords(bar, root)) == 16
 
 
 def test_rotate_keeps_a_note_ringing_over_the_bar_line():
@@ -210,6 +247,6 @@ def test_beat_endpoints(tmp_path):
     assert client.get("/api/beat", params={"path": "beatbox/bb.wav", "bass": "tuba"}).status_code == 422
     assert client.get("/api/beat", params={"path": "beatbox/bb.wav", "hats": "ride"}).status_code == 422
     track = client.get("/api/beat", params={"path": "beatbox/bb.wav", "form": "song"}).json()
-    assert track["form"] == "song" and "arrange(" in track["code"]
+    assert track["form"] == "song" and "arrange(" in track["code"] and track["song_bpm"] == track["bpm"]   # drums only: the take's tempo
     midi = client.get("/api/beat/midi", params={"path": "beatbox/bb.wav", "style": "mouth"})
     assert midi.status_code == 200 and midi.content[:4] == b"MThd"

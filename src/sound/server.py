@@ -529,6 +529,7 @@ def create_app(root: Path = DEFAULT_ROOT, web_dir: Path | None = DEFAULT_WEB) ->
         kinds = [k for k in beatbox.KINDS if any(h.kind == k for h in g.hits)]
         kit = {k: f"/api/beat/kit?path={quote(path)}&kind={k}" for k in kinds}
         return {"file": ws.describe(source), "bpm": g.bpm, "start": g.start,
+                "song_bpm": beatbox.TEMPO if g.oscillator and style_of(style) == "synth" else g.bpm,   # the song form's tempo
                 "key": f"{NOTE_NAMES[g.root]} minor" if g.root is not None else "A minor",
                 "bars": g.bars, "loop": sel, "snare_played": g.snare_played,
                 "skipped": [[round(a, 2), round(b, 2)] for a, b in g.skipped],

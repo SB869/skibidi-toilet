@@ -68,7 +68,7 @@ export function BeatView({ file, notify }: { file: AudioFile; notify: (m: string
         {beat && (
           <>
             <dl className="facts">
-              <dt>Tempo</dt><dd>{beat.bpm} BPM</dd>
+              <dt>Tempo</dt><dd>{form === "song" && beat.song_bpm !== beat.bpm ? <>{beat.song_bpm} BPM <span className="muted">· your take: {beat.bpm}</span></> : <>{beat.bpm} BPM</>}</dd>
               <dt>Key</dt><dd>{beat.key} <span className="muted">· from where your voice sat</span></dd>
               <dt>Groove</dt>
               <dd>{beat.bars.length} bars with a beat

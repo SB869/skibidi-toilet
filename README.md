@@ -47,6 +47,8 @@ uv run sound serve      # opens http://127.0.0.1:8765 (localhost only)
   support and belt) against yours. Readouts show your note and how many cents you're off,
   your input level, and your edge vs the reference's. Takes are captured uncompressed
   (32-bit float WAV) and scored against the reference the moment they're saved.
+- Open a library file straight from a link: `http://127.0.0.1:8765/?open=tracks/song.wav`
+  selects it and switches to its tab (Track, Beat, or Tune); add `&play` to start it playing.
 - **Record → Follow Ardour** (or open `http://127.0.0.1:8765/?ardour`): the reference,
   section and a take to compare come from the session open in Ardour, and stay in step with
   it (checked every 2 s while you're not singing). The section is the editor's range
@@ -73,27 +75,41 @@ uv run sound serve      # opens http://127.0.0.1:8765 (localhost only)
   highlighted). If you beatboxed an "oscillator" (a buzzed or hummed synth line), its riff is
   picked up note by note (the top lane of the grid) and leads the beat. **Sound** picks how:
   *synth* (the default) plays the synth your beatbox stands for - the riff snapped to the pulse
-  of your "bwom"s (marked under the lane) on a dance bass (**Bass** picks which: two GM synth
-  basses, an FM bass, a deep pluck or a fingered electric bass), each bwom as loud as you pushed it, the cutoff
-  drifting over the bars, 8th-note echoes between the bwoms, the last bwom ringing on over the bar
-  line, hats (**Hats**), a deep kick in the riff's key and a sub that ducks under it; *mouth* copies the recording - the
+  of your "bwom"s (marked under the lane) on a dance bass (**Bass** picks which: a driven saw
+  plucked by its filter (the default), a square plucked the same way, an FM bass, two GM synth
+  basses or a fingered electric bass), each bwom as loud as you pushed it, the cutoff drifting
+  over the bars, the last bwom ringing on over the bar line, hats (**Hats**: 909 16ths accented
+  on the off-beats and lightly swung (the default), an 808 tick accented on your bwoms, or
+  off-beat 8ths), a 909 kick with a tuned sine boom under it and a sine sub that ducks under
+  both; *mouth* copies the recording - the
   loudness and filter moving note by note the way your mouth moved them, and your booms as a
   kick that sweeps down into the riff's root like yours did. Without a riff, your
   kicks, snares and hats play on drum-machine sounds. Either way your own beatbox sounds are
-  layered underneath, and a clap backbeat is there to uncomment. **Form** switches between the
-  groove looped and the beat laid out as a track: 104 bars (about 3½ minutes) of intro, build
-  (the riff quiet and filtered, opening up under a pink-noise whoosh and a reversed crash,
-  everything pulling out before the drop), drop (the hats come in right here - **Hats** picks
-  them: 16ths accented on your bwoms (the default), straight 16ths, or off-beat 8ths - with an
-  open hat on the off-beats, a rimshot on the off-beats your bass leaves empty, a rave stab in your
-  key on the off-beat 8ths, and at the end of every 8 bars the kick skips beat 4 and the riff's
-  last beat is thrown into a long echo), breakdown (the riff alone with a dub echo, then the sub
-  and the whoosh, the kick rolling back in), a second drop with a quiet ride where the stab's
-  filter opens across every 8 bars, and an outro ending on one hit. Every piece is a `const` and the form is one `arrange(...)`, so adding
-  a part means one more line. It plays in an embedded
-  [Strudel](https://strudel.cc) editor: edit the code and press Ctrl+Enter; **MIDI** downloads
-  the loop (drums, riff, sub) for a DAW. `sound beat <file>` does the same from the command line
-  (`--song` writes the track too).
+  layered underneath, and an open hat and a clap backbeat are there to uncomment. **Form**
+  switches between the groove looped (at your tempo) and the beat laid out as a house/techno
+  track at 124 BPM: 112 bars (3:36) in 8-bar phrases with every big change on a 16-bar line -
+  intro (your kick alone, then the sub and the riff low and filtered), build (a pad takes up the
+  riff's chords, both opening up under a pink-noise whoosh and a reversed crash; kick, sub and
+  riff pull out before the drop), a 16-bar drop (the hats and the open hat come in right here;
+  then chord stabs on the off-beat 8ths; every 8th bar the kick skips beat 4), breakdown (no
+  kick: the pad holds the chords while the riff echoes and opens upward; then the sub returns,
+  the pad swells, the whoosh, and the kick rolls back in over two bars), a 32-bar second drop
+  that grows every 8 bars (a ride on your bwoms and the hook - the riff two octaves up with its
+  own echo - answering in the last two bars of each phrase; then the hook all through, the hats
+  dropping out for a bar; then the stabs' filter opening, kick and hats dropping out for two
+  beats before the peak; then the pad under it all with the riff's filter open) and a
+  16-bar outro ending on one hit, kick and sub together. The harmony is read off the riff: each stab or pad chord is the triad over the bass
+  note sounding under it, in the minor the riff spells (here A# minor with a Phrygian B), so
+  nothing ever clashes with the bass. The voices are mixed as one record: the kick ducks the sub,
+  the chords, the hook and (lightly) the hats so the top breathes with it; the stabs, pad, hook
+  and the 909 kit each sit on their own bus with a short room, a quiet echo on the stabs and the
+  hook, a little stereo width on the top and the kick, sub and bass dry in the centre; the hook is
+  the bass's own voice two octaves up. Every piece is a `const`; the form is two `arrange(...)`
+  blocks - the beat's, and the riff's with everything that follows it (sub, pad, hook), shifted
+  onto the first bwom as a whole so notes ring over section lines - so adding a part means one
+  more line. It plays in an embedded [Strudel](https://strudel.cc) editor: edit the code and
+  press Ctrl+Enter; **MIDI** downloads the loop (drums, riff, sub) for a DAW. `sound beat <file>`
+  does the same from the command line (`--song` writes the track too).
 
 Keys: <kbd>Space</kbd> play/pause, <kbd>T</kbd> original/tuned, <kbd>L</kbd> loop
 selection, <kbd>Esc</kbd> clear selection. Wheel zooms, shift+wheel scrolls.

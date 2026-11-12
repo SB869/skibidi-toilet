@@ -198,13 +198,14 @@ const post = (body: unknown, signal?: AbortSignal): RequestInit => ({
 export type Lane = "kick" | "snare" | "hat";
 export type BeatStyle = "synth" | "mouth";   // play what the beatbox stands for, or copy the mouth
 export type BeatForm = "loop" | "song";       // the groove looped, or laid out as a track
-export type BeatBass = "synth" | "bright" | "fm" | "pluck" | "finger";   // the riff's sound in the synth style
-export type BeatHats = "pulse" | "straight" | "offbeat";                 // the hats under the drop
+export type BeatBass = "saw" | "square" | "fm" | "synth" | "bright" | "finger";   // the riff's sound in the synth style
+export type BeatHats = "house" | "pulse" | "offbeat";                    // the hats under the drop
 
 /** A beatbox recording read as a groove, and the Strudel beat made from it (src/sound/beatbox.py). */
 export interface Beat {
   file: AudioFile;
   bpm: number;
+  song_bpm: number;               // the song form plays at club tempo (beatbox.TEMPO); the loop at bpm
   key: string;
   start: number;
   bars: Record<Lane, string>[];   // per bar: 16 characters, "x" a hit, "." none

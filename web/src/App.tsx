@@ -20,6 +20,7 @@ export function App() {
   const [currentRender, setCurrentRender] = useState<{ id: string; name: string } | null>(null);
   const [compareRef, setCompareRef] = useState<{ path: string; start?: number; end?: number } | null>(null);
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [autoplay, setAutoplay] = useState(false);  // ?open= tries to start the Track player
   const [offline, setOffline] = useState(false);
 
   const notify = useCallback((text: string, error = false) => {
@@ -46,6 +47,18 @@ export function App() {
   // ?ardour opens the Record tab following the session open in Ardour (RecordView picks it up).
   useEffect(() => {
     if (new URLSearchParams(window.location.search).has("ardour")) setTab({ tab: "record" });
+  }, []);
+
+  // ?open=<library path> lands on that file and its tab (e.g. ?open=tracks/song.wav opens it in Track);
+  // add &play to start a track playing instead of waiting for the play button.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const open = params.get("open");
+    if (!open) return;
+    setAutoplay(params.has("play"));
+    setSelected({ path: open });
+    setTab({ tab: open.startsWith("tracks/") ? "track" : open.startsWith("beatbox/") ? "beat" : "tune" });
+    window.history.replaceState(null, "", window.location.pathname);
   }, []);
 
   // Space plays/pauses anywhere; T flips between original and tuned.
@@ -113,7 +126,7 @@ export function App() {
             <div className="empty-state">Pick a beatbox recording from the library (drop one on the Beatbox group).</div>
           ))}
           {library && tab.tab === "track" && (file?.kind === "track" ? (
-            <TrackView key={file.path} file={file} />
+            <TrackView key={file.path} file={file} autoplay={autoplay} />
           ) : (
             <div className="empty-state">Pick a track from the library's Tracks group: a finished mix, rendered from the Beat tab's song form.</div>
           ))}
