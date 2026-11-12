@@ -1,11 +1,110 @@
 # sound
 
-Linux audio tools, starting with offline vocal pitch correction (autotune).
+Linux audio tools, starting with offline vocal pitch correction (autotune). The web interface
+(record against a song, live pitch, tuning, beats) also runs on Windows; only the Ardour
+features need Linux.
 
-## Setup
+## Run it on Windows, step by step
+
+Steps 1 to 3 happen once. After that, step 4 is all you do.
+
+### 1. Install the tools
+
+Open **Command Prompt**: press the Windows key, type `cmd`, press Enter. (Command Prompt, not
+PowerShell: PowerShell refuses to run `npm` on a fresh Windows.) Paste these lines one at a time
+and press Enter after each. If Windows asks "Do you want to allow this app to make changes",
+click **Yes**.
+
+```bat
+winget install -e --id Git.Git --accept-source-agreements --accept-package-agreements
+winget install -e --id astral-sh.uv --accept-source-agreements --accept-package-agreements
+winget install -e --id OpenJS.NodeJS.LTS --accept-source-agreements --accept-package-agreements
+winget install -e --id Gyan.FFmpeg --accept-source-agreements --accept-package-agreements
+```
+
+| tool | what it's for |
+|---|---|
+| Git | downloads this project, and its updates later |
+| uv | installs Python and the app's audio libraries for you (you don't install Python yourself) |
+| Node.js | builds the web page the app shows you |
+| FFmpeg | opens mp3, m4a, phone voice memos and video files |
+
+If it says `'winget' is not recognized`: open the Microsoft Store, install **App Installer**, and
+try again.
+
+**Now close Command Prompt and open a new one**, so it can find what you just installed.
+
+### 2. Download the project
+
+```bat
+cd %USERPROFILE%
+git clone https://github.com/SB869/skibidi-toilet.git
+cd skibidi-toilet
+```
+
+It lands in `C:\Users\<your name>\skibidi-toilet`.
+
+### 3. Set it up
+
+Still in the same window (about 750 MB of downloads; a few minutes):
+
+```bat
+uv sync
+cd web
+npm ci
+npm run build
+cd ..
+```
+
+`npm` prints some yellow `warn` lines; those are fine. Only a red `ERR!` means something failed.
+
+### 4. Start it (every time)
+
+Open Command Prompt and paste:
+
+```bat
+cd %USERPROFILE%\skibidi-toilet
+uv run sound serve
+```
+
+Your browser opens the app at <http://127.0.0.1:8765> (if it doesn't, type that address into
+the browser yourself). The black Command Prompt window **is** the app: leave it open while you
+use it. To stop, click into that window and press `Ctrl+C`, or just close it.
+
+- The first time you record, the browser asks to use your microphone: click **Allow**.
+- Wear headphones: the song you sing along to plays in them while you record.
+- To bring in a song, drag the file from File Explorer onto a group in the Library (left).
+- Everything you import or record is saved in `C:\Users\<your name>\skibidi-toilet\recordings`.
+  It stays on your computer; none of it is ever uploaded.
+
+### Getting the newest version
+
+```bat
+cd %USERPROFILE%\skibidi-toilet
+git pull
+uv sync
+cd web
+npm ci
+npm run build
+cd ..
+```
+
+Then start it as in step 4.
+
+### If something goes wrong
+
+- `'git'` (or `uv`, `npm`, `ffmpeg`) `is not recognized`: close Command Prompt and open a new one.
+  If it still says that, run that tool's `winget install` line from step 1 again.
+- The page says the web interface hasn't been built: run step 3 again.
+- `address already in use`: the app is already running in another window. Use that one, or
+  start a second copy with `uv run sound serve --port 8766`.
+- "Follow Ardour" doesn't work: that part needs Linux and Ardour.
+
+## Setup (Linux, and for working on the code)
 
 ```sh
 uv sync
+(cd web && npm install && npm run build)    # the web interface, once and after pulling changes
 uv tool install --editable .    # optional: puts `sound` and `autotune` on your PATH
 ```
 
