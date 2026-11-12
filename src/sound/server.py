@@ -9,6 +9,7 @@ Files live in a workspace folder (default: <project>/recordings):
 from __future__ import annotations
 
 import re
+import shutil
 import tempfile
 import threading
 import time
@@ -320,7 +321,7 @@ def create_app(root: Path = DEFAULT_ROOT, web_dir: Path | None = DEFAULT_WEB) ->
             else:
                 audiofile.probe(tmp_path)  # refuse anything that isn't audio
                 out = ws.unique(FOLDERS[kind], Path(name).stem, suffix)
-                tmp_path.replace(out)
+                shutil.move(tmp_path, out)  # not replace(): the temp folder can be on another drive
         except RuntimeError as e:
             raise HTTPException(422, f"{name}: not an audio file I can read ({e})")
         finally:

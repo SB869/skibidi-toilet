@@ -18,6 +18,7 @@ Ardour rewrites its config files when it quits, so they're only edited while it 
 from __future__ import annotations
 
 import re
+import shutil
 import subprocess
 import time
 import urllib.request
@@ -32,6 +33,8 @@ SURFACES = ("MCP HTTP Server (Experimental)", "Open Sound Control (OSC)")
 
 def running() -> bool:
     """Ask Flatpak, not pgrep: a pattern search also matches any shell that mentions Ardour."""
+    if shutil.which("flatpak") is None:  # no Flatpak (Windows, macOS): no Ardour to follow
+        return False
     ps = subprocess.run(["flatpak", "ps", "--columns=application"], capture_output=True, text=True)
     return APP in ps.stdout.split()
 

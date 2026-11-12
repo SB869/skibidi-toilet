@@ -13,7 +13,6 @@ std::bitset of LuaSignal values the hook listens to (gtk2_ardour/luasignal_syms.
 from __future__ import annotations
 
 import base64
-import fcntl
 import json
 import math
 import os
@@ -24,6 +23,11 @@ from pathlib import Path
 from typing import Any
 
 from . import daw
+
+try:
+    import fcntl
+except ImportError:  # Windows: no fcntl, and no Ardour bridge either (Ardour runs as a Linux Flatpak)
+    fcntl = None
 
 BRIDGE_DIR = daw.CONFIG_DIR / "sound-bridge"
 SCRIPT = Path(__file__).with_name("ardour_bridge.lua")
@@ -112,7 +116,8 @@ def call(command: str, timeout: float = 30.0, **args: Any) -> Any:
     BRIDGE_DIR.mkdir(parents=True, exist_ok=True)
     # one request at a time across processes (the web server, the MCP server, the CLI)
     with open(BRIDGE_DIR / "lock", "w") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
         return _exchange(command, timeout, args)
 
 
